@@ -31,3 +31,10 @@ export interface GroupWithDetails extends Group {
   subgroups: SubgroupWithDetails[];
   isExpanded: boolean;
 }
+
+export interface Profile {
+  id: string;
+  email: string;
+  created_at: string;
+  updated_at: string;
+}

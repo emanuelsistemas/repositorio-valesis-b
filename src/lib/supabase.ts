@@ -1,56 +1,63 @@
 import { createClient } from '@supabase/supabase-js';
+import type { Database } from '../types/database';
+import toast from 'react-hot-toast';
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
 
 if (!supabaseUrl || !supabaseAnonKey) {
-  throw new Error('Missing Supabase environment variables');
+  throw new Error('Variáveis de ambiente do Supabase não encontradas');
 }
 
-export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
+console.log('🔌 Inicializando cliente Supabase...');
+
+export const supabase = createClient<Database>(supabaseUrl, supabaseAnonKey, {
   auth: {
     persistSession: true,
     autoRefreshToken: true,
     detectSessionInUrl: false,
-  },
-  global: {
-    headers: {
-      'X-Client-Info': 'supabase-js/2.39.7',
-    },
-  },
-  db: {
-    schema: 'public',
-  },
-  realtime: {
-    params: {
-      eventsPerSecond: 10,
-    },
+    storage: window.sessionStorage,
   },
 });
 
-export const checkConnection = async () => {
+console.log('✅ Cliente Supabase inicializado');
+
+export const checkConnection = async (): Promise<boolean> => {
   try {
-    const { data, error } = await supabase.from('groups').select('id').limit(1);
-    if (error) {
-      console.error('Connection check error:', error);
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) {
       return false;
     }
-    return Array.isArray(data);
+
+    const { error } = await supabase
+      .from('profiles')
+      .select('id')
+      .eq('id', session.user.id)
+      .single();
+
+    return !error;
   } catch (error) {
-    console.error('Connection check failed:', error);
+    console.error('❌ Erro na verificação de conexão:', error);
     return false;
   }
 };
 
-export const handleSupabaseError = (error: any) => {
-  if (error?.message?.includes('Failed to fetch')) {
-    return 'Erro de conexão com o servidor. Verifique sua conexão com a internet.';
+export const handleSupabaseError = (error: any): string => {
+  console.error('❌ Erro Supabase:', error);
+  
+  if (!error) return 'Erro desconhecido';
+
+  if (error.message?.includes('Invalid login credentials')) {
+    return 'Email ou senha inválidos';
   }
-  if (error?.code === 'PGRST301') {
-    return 'Sessão expirada. Por favor, faça login novamente.';
+
+  if (error.message?.includes('JWT') || error.message?.includes('token')) {
+    return 'Sua sessão expirou. Por favor, faça login novamente.';
   }
-  if (error?.code?.startsWith('PGRST')) {
-    return 'Erro no servidor. Por favor, tente novamente mais tarde.';
+
+  if (error.message?.includes('network') || error.message?.includes('Failed to fetch')) {
+    return 'Erro de conexão com o servidor';
   }
-  return 'Ocorreu um erro inesperado. Por favor, tente novamente.';
+
+  return error.message || 'Ocorreu um erro inesperado';
 };

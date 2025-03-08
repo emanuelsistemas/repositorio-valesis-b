@@ -1,60 +1,95 @@
 import React, { useState, useEffect } from 'react';
 import { Toaster } from 'react-hot-toast';
 import { Loader2 } from 'lucide-react';
+import toast from 'react-hot-toast';
 import Login from './components/Login';
 import Dashboard from './components/Dashboard';
-import { supabase } from './lib/supabase';
+import { supabase, handleSupabaseError } from './lib/supabase';
+import type { Profile } from './types/database';
 
 function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [isLoggingOut, setIsLoggingOut] = useState(false);
+  const [userProfile, setUserProfile] = useState<Profile | null>(null);
 
-  useEffect(() => {
-    checkUser();
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      setIsAuthenticated(!!session);
-      setIsLoading(false);
-    });
+  const resetAuthState = async () => {
+    setIsAuthenticated(false);
+    setUserProfile(null);
+    await supabase.auth.signOut();
+    window.sessionStorage.clear();
+  };
 
-    return () => subscription.unsubscribe();
-  }, []);
-
-  const checkUser = async () => {
+  const fetchProfile = async (userId: string) => {
     try {
-      const { data: { session } } = await supabase.auth.getSession();
-      setIsAuthenticated(!!session);
+      const { data: profile, error } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', userId)
+        .single();
+
+      if (error) throw error;
+      if (!profile) throw new Error('Perfil não encontrado');
+
+      setUserProfile(profile);
+      setIsAuthenticated(true);
     } catch (error) {
-      console.error('Erro ao verificar usuário:', error);
-      setIsAuthenticated(false);
-    } finally {
-      setIsLoading(false);
+      console.error('Erro ao buscar perfil:', error);
+      await resetAuthState();
+      throw error;
     }
   };
 
+  useEffect(() => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(
+      async (event, session) => {
+        if (event === 'SIGNED_OUT') {
+          await resetAuthState();
+        } else if (session?.user?.id) {
+          try {
+            await fetchProfile(session.user.id);
+          } catch (error) {
+            toast.error(handleSupabaseError(error));
+          }
+        }
+        setIsLoading(false);
+      }
+    );
+
+    return () => {
+      subscription.unsubscribe();
+    };
+  }, []);
+
   const handleLogin = async (email: string, password: string) => {
     try {
+      setIsLoading(true);
       const { data, error } = await supabase.auth.signInWithPassword({
         email,
         password
       });
 
       if (error) throw error;
-      setIsAuthenticated(!!data.session);
+
+      if (data.session?.user?.id) {
+        await fetchProfile(data.session.user.id);
+        toast.success('Login realizado com sucesso!');
+      }
     } catch (error) {
-      console.error('Erro de login:', error);
-      setIsAuthenticated(false);
+      await resetAuthState();
+      throw new Error(handleSupabaseError(error));
+    } finally {
+      setIsLoading(false);
     }
   };
 
   const handleLogout = async () => {
     try {
       setIsLoggingOut(true);
-      const { error } = await supabase.auth.signOut();
-      if (error) throw error;
-      setIsAuthenticated(false);
+      await resetAuthState();
+      toast.success('Logout realizado com sucesso');
     } catch (error) {
-      console.error('Erro ao sair:', error);
+      toast.error(handleSupabaseError(error));
     } finally {
       setIsLoggingOut(false);
     }
@@ -63,7 +98,10 @@ function App() {
   if (isLoading) {
     return (
       <div className="min-h-screen bg-gray-900 text-gray-100 flex items-center justify-center">
-        <div className="text-xl">Carregando...</div>
+        <div className="flex flex-col items-center gap-3">
+          <Loader2 className="w-6 h-6 animate-spin text-blue-500" />
+          <span className="text-xl">Carregando...</span>
+        </div>
       </div>
     );
   }
@@ -78,6 +116,7 @@ function App() {
           </div>
         </div>
       )}
+      
       <Toaster
         position="top-right"
         toastOptions={{
@@ -101,10 +140,11 @@ function App() {
           },
         }}
       />
+
       {!isAuthenticated ? (
         <Login onLogin={handleLogin} />
       ) : (
-        <Dashboard onLogout={handleLogout} />
+        <Dashboard onLogout={handleLogout} userProfile={userProfile} />
       )}
     </div>
   );

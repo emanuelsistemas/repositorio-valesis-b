@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { LogIn } from 'lucide-react';
+import toast from 'react-hot-toast';
 
 interface LoginProps {
   onLogin: (email: string, password: string) => Promise<void>;
@@ -8,19 +9,18 @@ interface LoginProps {
 const Login: React.FC<LoginProps> = ({ onLogin }) => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setError('');
     setIsLoading(true);
 
     try {
       await onLogin(email, password);
-    } catch (error) {
-      console.error('Erro de login:', error);
-      setError('Email ou senha inválidos');
+      toast.success('Login realizado com sucesso!');
+    } catch (error: any) {
+      console.error('Login error:', error);
+      toast.error(error.message || 'Erro ao fazer login');
     } finally {
       setIsLoading(false);
     }
@@ -69,9 +69,6 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
               />
             </div>
           </div>
-          {error && (
-            <div className="text-red-500 text-sm text-center">{error}</div>
-          )}
           <button
             type="submit"
             disabled={isLoading}

@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import toast from 'react-hot-toast';
 import { supabase, checkConnection } from '../lib/supabase';
-import type { GroupWithDetails } from '../types/database';
+import type { GroupWithDetails, Profile } from '../types/database';
 import DeleteConfirmationModal from './DeleteConfirmationModal';
 import EditModal from './EditModal';
 import Sidebar from './Sidebar/Sidebar';
@@ -9,6 +9,7 @@ import FileList from './FileList/FileList';
 
 interface DashboardProps {
   onLogout: () => void;
+  userProfile: Profile | null;
 }
 
 interface DeleteModalState {
@@ -25,7 +26,7 @@ interface EditModalState {
   itemId: string;
 }
 
-const Dashboard: React.FC<DashboardProps> = ({ onLogout }) => {
+const Dashboard: React.FC<DashboardProps> = ({ onLogout, userProfile }) => {
   const [groups, setGroups] = useState<GroupWithDetails[]>([]);
   const [newGroupName, setNewGroupName] = useState('');
   const [selectedSubgroup, setSelectedSubgroup] = useState<string | null>(null);
@@ -33,9 +34,8 @@ const Dashboard: React.FC<DashboardProps> = ({ onLogout }) => {
   const [newFileLink, setNewFileLink] = useState('');
   const [addingSubgroupTo, setAddingSubgroupTo] = useState<string | null>(null);
   const [newSubgroupName, setNewSubgroupName] = useState('');
-  const [isLoading, setIsLoading] = useState(true);
+  const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [userId, setUserId] = useState<string | null>(null);
   const [isConnected, setIsConnected] = useState(true);
   const [deleteModal, setDeleteModal] = useState<DeleteModalState>({
     isOpen: false,
@@ -52,12 +52,12 @@ const Dashboard: React.FC<DashboardProps> = ({ onLogout }) => {
 
   const handleAddGroup = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newGroupName.trim() || !userId) return;
+    if (!newGroupName.trim() || !userProfile?.id) return;
 
     try {
       const { data, error } = await supabase
         .from('groups')
-        .insert([{ name: newGroupName, user_id: userId }])
+        .insert([{ name: newGroupName, user_id: userProfile.id }])
         .select();
 
       if (error) throw error;
@@ -81,7 +81,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onLogout }) => {
   };
 
   const handleAddSubgroup = async (groupId: string) => {
-    if (!newSubgroupName.trim() || !userId) return;
+    if (!newSubgroupName.trim() || !userProfile?.id) return;
 
     try {
       const { data, error } = await supabase
@@ -89,7 +89,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onLogout }) => {
         .insert([{
           name: newSubgroupName,
           group_id: groupId,
-          user_id: userId
+          user_id: userProfile.id
         }])
         .select();
 
@@ -128,7 +128,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onLogout }) => {
 
   const handleAddFile = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newFileName.trim() || !newFileLink.trim() || !selectedSubgroup || !userId) return;
+    if (!newFileName.trim() || !newFileLink.trim() || !selectedSubgroup || !userProfile?.id) return;
 
     try {
       const { data, error } = await supabase
@@ -137,7 +137,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onLogout }) => {
           name: newFileName,
           link: newFileLink,
           subgroup_id: selectedSubgroup,
-          user_id: userId
+          user_id: userProfile.id
         }])
         .select();
 
@@ -317,95 +317,67 @@ const Dashboard: React.FC<DashboardProps> = ({ onLogout }) => {
   }, []);
 
   const fetchGroups = useCallback(async () => {
-    if (!isConnected || !userId) return;
+    if (!userProfile?.id) return;
 
     try {
       setIsLoading(true);
+      setError(null);
+
       const [groupsResponse, subgroupsResponse, filesResponse] = await Promise.all([
-        supabase.from('groups').select('*').eq('user_id', userId).order('created_at', { ascending: true }),
-        supabase.from('subgroups').select('*').eq('user_id', userId).order('created_at', { ascending: true }),
-        supabase.from('files').select('*').eq('user_id', userId).order('created_at', { ascending: true })
+        supabase.from('groups').select('*').eq('user_id', userProfile.id).order('created_at', { ascending: true }),
+        supabase.from('subgroups').select('*').eq('user_id', userProfile.id).order('created_at', { ascending: true }),
+        supabase.from('files').select('*').eq('user_id', userProfile.id).order('created_at', { ascending: true })
       ]);
 
       if (groupsResponse.error) throw groupsResponse.error;
       if (subgroupsResponse.error) throw subgroupsResponse.error;
       if (filesResponse.error) throw filesResponse.error;
 
-      const groupsWithDetails: GroupWithDetails[] = (groupsResponse.data || []).map(group => {
-        const existingGroup = groups.find(g => g.id === group.id);
-        
-        return {
-          ...group,
-          isExpanded: existingGroup?.isExpanded ?? false,
-          subgroups: (subgroupsResponse.data || [])
-            .filter(subgroup => subgroup.group_id === group.id)
-            .map(subgroup => {
-              const existingSubgroup = existingGroup?.subgroups.find(s => s.id === subgroup.id);
-              
-              return {
-                ...subgroup,
-                isExpanded: existingSubgroup?.isExpanded ?? false,
-                files: (filesResponse.data || []).filter(file => file.subgroup_id === subgroup.id)
-              };
-            })
-        };
-      });
+      const groupsWithDetails: GroupWithDetails[] = (groupsResponse.data || []).map(group => ({
+        ...group,
+        isExpanded: false,
+        subgroups: (subgroupsResponse.data || [])
+          .filter(subgroup => subgroup.group_id === group.id)
+          .map(subgroup => ({
+            ...subgroup,
+            isExpanded: false,
+            files: (filesResponse.data || []).filter(file => file.subgroup_id === subgroup.id)
+          }))
+      }));
 
       setGroups(groupsWithDetails);
-      setError(null);
     } catch (error) {
       console.error('Erro ao carregar dados:', error);
-      const errorMessage = handleSupabaseError(error);
-      setError(errorMessage);
+      setError('Erro ao carregar dados. Por favor, tente novamente.');
+      toast.error('Erro ao carregar dados');
+    } finally {
+      setIsLoading(false);
+    }
+  }, [userProfile?.id]);
+
+  useEffect(() => {
+    if (userProfile?.id) {
+      fetchGroups();
+    }
+  }, [userProfile?.id, fetchGroups]);
+
+  useEffect(() => {
+    const checkConnectionStatus = async () => {
       const connected = await checkConnection();
       setIsConnected(connected);
       
       if (!connected) {
+        setError('Erro de conexão com o banco de dados');
         toast.error('Conexão perdida com o servidor');
-      }
-    } finally {
-      setIsLoading(false);
-    }
-  }, [isConnected, userId, groups]);
-
-  useEffect(() => {
-    const initializeApp = async () => {
-      try {
-        const { data: { session } } = await supabase.auth.getSession();
-        if (!session) {
-          onLogout();
-          return;
-        }
-
-        const connected = await checkConnection();
-        setIsConnected(connected);
-        
-        if (!connected) {
-          setError('Erro de conexão com o banco de dados. Por favor, recarregue a página.');
-          return;
-        }
-
-        const { data: { user } } = await supabase.auth.getUser();
-        if (user) {
-          setUserId(user.id);
-        } else {
-          onLogout();
-        }
-      } catch (error) {
-        console.error('Erro ao inicializar aplicação:', error);
-        setError('Erro ao inicializar a aplicação');
-        onLogout();
+      } else {
+        setError(null);
       }
     };
 
-    initializeApp();
-  }, [onLogout]);
-
-  useEffect(() => {
-    if (userId && isConnected) {
-      fetchGroups();
-    }
-  }, [userId, isConnected, fetchGroups]);
+    checkConnectionStatus();
+    const interval = setInterval(checkConnectionStatus, 30000);
+    return () => clearInterval(interval);
+  }, []);
 
   if (isLoading) {
     return (
@@ -441,6 +413,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onLogout }) => {
           newSubgroupName={newSubgroupName}
           isConnected={isConnected}
           error={error}
+          userProfile={userProfile}
           onLogout={onLogout}
           onGroupNameChange={setNewGroupName}
           onAddGroup={handleAddGroup}
