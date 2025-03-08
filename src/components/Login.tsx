@@ -17,7 +17,6 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
 
     try {
       await onLogin(email, password);
-      toast.success('Login realizado com sucesso!');
     } catch (error: any) {
       console.error('Login error:', error);
       toast.error(error.message || 'Erro ao fazer login');

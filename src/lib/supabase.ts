@@ -9,23 +9,19 @@ if (!supabaseUrl || !supabaseAnonKey) {
   throw new Error('Variáveis de ambiente do Supabase não encontradas');
 }
 
-console.log('🔌 Inicializando cliente Supabase...');
-
 export const supabase = createClient<Database>(supabaseUrl, supabaseAnonKey, {
   auth: {
-    persistSession: true,
-    autoRefreshToken: true,
+    persistSession: false,
+    autoRefreshToken: false,
     detectSessionInUrl: false,
     storage: window.sessionStorage,
   },
 });
 
-console.log('✅ Cliente Supabase inicializado');
-
 export const checkConnection = async (): Promise<boolean> => {
   try {
     const { data: { session } } = await supabase.auth.getSession();
-    if (!session) {
+    if (!session?.user?.id) {
       return false;
     }
 

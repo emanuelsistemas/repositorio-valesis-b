@@ -11,16 +11,53 @@ function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [isLoggingOut, setIsLoggingOut] = useState(false);
+  const [logoutBlur, setLogoutBlur] = useState(false);
   const [userProfile, setUserProfile] = useState<Profile | null>(null);
 
+  useEffect(() => {
+    window.history.pushState(null, '', window.location.pathname);
+    const handlePopState = () => {
+      window.history.pushState(null, '', window.location.pathname);
+    };
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, []);
+
   const resetAuthState = async () => {
-    setIsAuthenticated(false);
-    setUserProfile(null);
-    await supabase.auth.signOut();
-    window.sessionStorage.clear();
+    try {
+      setIsLoggingOut(true);
+      setLogoutBlur(true);
+
+      await new Promise(resolve => setTimeout(resolve, 100));
+      
+      setIsAuthenticated(false);
+      setUserProfile(null);
+
+      window.sessionStorage.clear();
+      window.localStorage.clear();
+      
+      document.cookie.split(';').forEach(cookie => {
+        document.cookie = cookie
+          .replace(/^ +/, '')
+          .replace(/=.*/, `=;expires=${new Date(0).toUTCString()};path=/`);
+      });
+
+      await supabase.auth.signOut();
+      await new Promise(resolve => setTimeout(resolve, 500));
+
+      setIsLoggingOut(false);
+      setLogoutBlur(false);
+      
+      window.location.href = '/';
+    } catch (error) {
+      console.error('Erro ao fazer logout:', error);
+      setIsLoggingOut(false);
+      setLogoutBlur(false);
+      window.location.reload();
+    }
   };
 
-  const fetchProfile = async (userId: string) => {
+  const fetchProfile = async (userId: string): Promise<void> => {
     try {
       const { data: profile, error } = await supabase
         .from('profiles')
@@ -41,22 +78,56 @@ function App() {
   };
 
   useEffect(() => {
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      async (event, session) => {
-        if (event === 'SIGNED_OUT') {
-          await resetAuthState();
-        } else if (session?.user?.id) {
-          try {
-            await fetchProfile(session.user.id);
-          } catch (error) {
-            toast.error(handleSupabaseError(error));
-          }
+    let mounted = true;
+
+    const initAuth = async () => {
+      try {
+        const { data: { session }, error } = await supabase.auth.getSession();
+        
+        if (!mounted) return;
+        
+        if (error) throw error;
+
+        if (session?.user?.id) {
+          await fetchProfile(session.user.id);
         }
-        setIsLoading(false);
+      } catch (error) {
+        console.error('Erro ao inicializar auth:', error);
+        if (mounted) {
+          setIsAuthenticated(false);
+          setUserProfile(null);
+        }
+      } finally {
+        if (mounted) {
+          setIsLoading(false);
+        }
       }
-    );
+    };
+
+    initAuth();
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+      if (!mounted) return;
+      
+      if (event === 'SIGNED_OUT') {
+        setIsAuthenticated(false);
+        setUserProfile(null);
+        setIsLoading(false);
+      } else if (session?.user?.id && event === 'SIGNED_IN') {
+        try {
+          await fetchProfile(session.user.id);
+          setIsLoading(false);
+        } catch (error) {
+          toast.error(handleSupabaseError(error));
+          setIsAuthenticated(false);
+          setUserProfile(null);
+          setIsLoading(false);
+        }
+      }
+    });
 
     return () => {
+      mounted = false;
       subscription.unsubscribe();
     };
   }, []);
@@ -64,6 +135,7 @@ function App() {
   const handleLogin = async (email: string, password: string) => {
     try {
       setIsLoading(true);
+      
       const { data, error } = await supabase.auth.signInWithPassword({
         email,
         password
@@ -76,7 +148,8 @@ function App() {
         toast.success('Login realizado com sucesso!');
       }
     } catch (error) {
-      await resetAuthState();
+      setIsAuthenticated(false);
+      setUserProfile(null);
       throw new Error(handleSupabaseError(error));
     } finally {
       setIsLoading(false);
@@ -84,15 +157,7 @@ function App() {
   };
 
   const handleLogout = async () => {
-    try {
-      setIsLoggingOut(true);
-      await resetAuthState();
-      toast.success('Logout realizado com sucesso');
-    } catch (error) {
-      toast.error(handleSupabaseError(error));
-    } finally {
-      setIsLoggingOut(false);
-    }
+    await resetAuthState();
   };
 
   if (isLoading) {
@@ -107,10 +172,10 @@ function App() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-900 text-gray-100">
+    <div className={`min-h-screen bg-gray-900 text-gray-100 transition-all duration-300 ${logoutBlur ? 'blur-sm' : ''}`}>
       {isLoggingOut && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-gray-800 rounded-lg p-6 flex items-center space-x-3">
+        <div className="fixed inset-0 bg-black bg-opacity-50 backdrop-blur-sm flex items-center justify-center z-50 animate-fadeIn">
+          <div className="bg-gray-800 rounded-lg p-6 flex items-center space-x-3 animate-slideIn">
             <Loader2 className="w-6 h-6 animate-spin text-blue-500" />
             <span className="text-lg">Saindo...</span>
           </div>
